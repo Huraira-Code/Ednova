@@ -1,80 +1,94 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { createServer } from "node:http";
+// import { createServer } from "node:http"; // Not needed if you're not listening yourself
+// import { Server } from "socket.io"; // See explanation below for Socket.IO on Vercel
 import Stripe from "stripe";
-import { Server } from "socket.io";
 import { config } from "dotenv";
 
 import connectToDB from "./config/db.config.js";
-import Message from "./models/message.model.js";
-import Chatroom from "./models/chatroom.model.js";
+// import Message from "./models/message.model.js"; // Only uncomment if used outside Socket.IO
+// import Chatroom from "./models/chatroom.model.js"; // Only uncomment if used outside Socket.IO
 
-config();
+config(); // Load environment variables from .env
 connectToDB();
-import dotenv from "dotenv";
-// Load environment variables IMMEDIATELY at the start of the app
-dotenv.config();
 import "./config/cloudinary.config.js";
 
 const app = express();
-const server = createServer(app);
+
+// Initialize Stripe (assuming you'll use it in your routes)
 export const stripe = Stripe(process.env.STRIPE_SECRET);
-const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:5174",
-  },
-});
 
-// track the online users
-let users = [];
+// --- IMPORTANT: Socket.IO on Vercel ---
+// Running a traditional Socket.IO server (which relies on persistent WebSockets)
+// directly within a Vercel Serverless Function is generally not feasible or recommended.
+// Serverless functions are designed to be stateless and ephemeral.
+// A dedicated HTTP server (like the one 'createServer(app)' creates)
+// and the 'io = new Server(server)' setup will NOT work as expected on Vercel
+// because Vercel wraps your Express app and doesn't expose the underlying HTTP server
+// in a way that allows you to attach Socket.IO to it for long-lived connections.
+//
+// The Socket.IO related code (createServer, new Server, socket.on, io.emit, etc.)
+// will effectively be non-functional in this serverless setup.
+// You will need a different approach for real-time communication on Vercel.
+// See the explanation below for recommended solutions.
+// For now, we'll comment out the Socket.IO server setup to fix the main Express app.
+// const server = createServer(app);
+// const io = new Server(server, {
+//   cors: {
+//     origin: "http://localhost:5174", // Make sure this matches your frontend URL
+//   },
+// });
 
-// handle events on user connect
-io.on("connection", (socket) => {
-  socket.on("addUser", (userId) => {
-    const isUserExist = users.find((user) => userId === user.userId);
-    if (!isUserExist) {
-      users.push({ userId, socketId: socket.id });
-    }
-    io.emit("getUsers", users);
-  });
+// // track the online users
+// let users = [];
 
-  socket.on(
-    "send message",
-    async ({ senderId, receiverId, content, chatroomId }) => {
-      const sender = users.find((user) => user.userId === senderId);
-      const receiver = users.find((user) => user.userId === receiverId);
+// // handle events on user connect
+// io.on("connection", (socket) => {
+//   socket.on("addUser", (userId) => {
+//     const isUserExist = users.find((user) => userId === user.userId);
+//     if (!isUserExist) {
+//       users.push({ userId, socketId: socket.id });
+//     }
+//     io.emit("getUsers", users);
+//   });
 
-      const message = new Message({
-        sender: senderId,
-        chatroomId,
-        content,
-      });
+//   socket.on(
+//     "send message",
+//     async ({ senderId, receiverId, content, chatroomId }) => {
+//       const sender = users.find((user) => user.userId === senderId);
+//       const receiver = users.find((user) => user.userId === receiverId);
 
-      const resullt = await message.save();
+//       const message = new Message({
+//         sender: senderId,
+//         chatroomId,
+//         content,
+//       });
 
-      if (resullt) {
-        if (receiver) {
-          io.to(sender.socketId)
-            .to(receiver.socketId)
-            .emit("get message", message);
-        } else {
-          io.to(sender.socketId).emit("get message", message);
-          await Chatroom.findOneAndUpdate(
-            { "unreadCounts.user": senderId, _id: chatroomId },
-            { $inc: { "unreadCounts.$.count": 1 } },
-            { new: true }
-          );
-        }
-      }
-    }
-  );
+//       const resullt = await message.save();
 
-  socket.on("disconnect", () => {
-    users = users.filter((user) => user.socketId !== socket.id);
-    io.emit("getUsers", users);
-  });
-});
+//       if (resullt) {
+//         if (receiver) {
+//           io.to(sender.socketId)
+//             .to(receiver.socketId)
+//             .emit("get message", message);
+//         } else {
+//           io.to(sender.socketId).emit("get message", message);
+//           await Chatroom.findOneAndUpdate(
+//             { "unreadCounts.user": senderId, _id: chatroomId },
+//             { $inc: { "unreadCounts.$.count": 1 } },
+//             { new: true }
+//           );
+//         }
+//       }
+//     }
+//   );
+
+//   socket.on("disconnect", () => {
+//     users = users.filter((user) => user.socketId !== socket.id);
+//     io.emit("getUsers", users);
+//   });
+// });
 
 const corsOptions = {
   origin: ["http://localhost:5173", process.env.FRONT_URL],
@@ -121,8 +135,11 @@ app.all("*", (req, res) => {
 // handle error and send resopnse
 app.use(errorMiddleware);
 
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  console.log(`server is running on port: ${PORT}`);
-});
+// --- THIS IS THE KEY CHANGE FOR VERCEL ---
+// Export the Express app instance directly.
+// Vercel will then handle the HTTP listening and routing to your app.
+export default app;
+// Remove the server.listen() call as Vercel handles this
+// server.listen(PORT, () => {
+//   console.log(`server is running on port: ${PORT}`);
+// });
