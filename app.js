@@ -94,8 +94,8 @@ const corsOptions = {
   origin: ["http://localhost:5173", process.env.FRONT_URL],
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
   credentials: true,
+  // Removed "Access-Control-Allow-Origin" from allowedHeaders as it's a response header.
   allowedHeaders: [
-    "Access-Control-Allow-Origin",
     "Content-Type",
     "Authorization",
   ],
