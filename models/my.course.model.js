@@ -32,6 +32,37 @@ const myCourseSchema = new Schema(
             ],
           },
         ],
+        quizScores: [
+          {
+            quizId: {
+              type: String,
+              required: true,
+            },
+            score: {
+              // Points obtained by the user in this quiz attempt
+              type: Number,
+              required: true,
+              default: 0,
+            },
+            totalPoints: {
+              // Total possible points for the quiz
+              type: Number,
+              required: true,
+            },
+            submittedAt: {
+              type: Date,
+              default: Date.now,
+            },
+            // Optionally, you could store user's answers for review
+            // userAnswers: [
+            //   {
+            //     questionId: String,
+            //     submittedAnswer: String,
+            //     isCorrect: Boolean,
+            //   }
+            // ],
+          },
+        ],
       },
     ],
   },

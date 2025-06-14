@@ -49,10 +49,10 @@ export const createBadges = async (req, res, next) => {
     }
 
     // 6. Remove the file from the local server
-    await fs.rm(`uploads/${req.file.filename}`);
+    await fs.rm(`tmp/${req.file.filename}`);
   } catch (error) {
     // If Cloudinary upload fails, delete the local file and return an error
-    await fs.rm(`uploads/${req.file.filename}`);
+    await fs.rm(`tmp/${req.file.filename}`);
     console.error("Error during Cloudinary upload:", error);
     return next(
       new AppError("File could not be uploaded, please try again.", 500)

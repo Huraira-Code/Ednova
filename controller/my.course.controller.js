@@ -4,6 +4,7 @@ import asyncHandler from "../middleware/asyncHandler.middleware.js";
 import AppError from "../utils/error.utils.js";
 import User from "../models/user.model.js";
 import Badges from "../models/badges.model.js";
+import Course from "../models/course.model.js";
 
 /**
  * @GET_MY_COURSE_LIST
@@ -316,13 +317,13 @@ export const updateLectureMark = asyncHandler(async (req, res, next) => {
         // Condition to Award Badge
         if (updatedUser.XP >= badge.XP && !userHasBadge) {
           newBadgesToAwardIds.push(badge._id);
-          console.log("error word" , badge)
+          console.log("error word", badge);
           badgeStatusChanges.push({ badge: badge, status: "acquired" });
           console.log(`User ${id} acquired badge: ${badge.title}`);
         }
         // Condition to Remove Badge (if XP drops below requirement AND user has the badge)
         else if (updatedUser.XP < badge.XP && userHasBadge) {
-          console.log("removing" , badge)
+          console.log("removing", badge);
           badgesToPullIds.push(badge._id);
           badgeStatusChanges.push({ badge: badge, status: "removed" });
           console.log(`User ${id} removed badge: ${badge.title}`);
@@ -410,5 +411,259 @@ export const deleteNote = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     message: "notes removed from lecture progress",
+  });
+});
+
+// ... (Your existing controller functions like getLecturesByCourseId, addLectureIntoCourseById, etc.)
+
+// --- NEW: Controller for submitting quiz answers ---
+
+/**
+ * @SUBMIT_QUIZ_ANSWERS
+ * @ROUTE @POST
+ * @ACCESS student/user {{url}}/api/v1/courses/:courseId/quizzes/:quizId/submit
+ * @BODY { answers: [{ questionId: String, submittedAnswer: String }] }
+ *
+ * This controller handles the submission of quiz answers by a user.
+ * It grades the quiz, calculates the score, and stores the result
+ * in the user's `MyCourse` document. It also updates the user's XP
+ * and checks for badge assignments or removals based on the new XP.
+ */
+export const submitQuizAnswers = asyncHandler(async (req, res, next) => {
+  const { courseId, quizId } = req.params;
+  const { answers } = req.body;
+  const userId = req.user?.id; // Assuming req.user.id is populated by auth middleware
+
+  // 1. Basic input validation
+  if (!userId) {
+    return next(
+      new AppError(
+        "User not authenticated. Please log in to submit quizzes.",
+        401
+      )
+    );
+  }
+
+  if (!answers || !Array.isArray(answers) || answers.length === 0) {
+    return next(
+      new AppError(
+        "Quiz answers are required and must be provided as an array.",
+        400
+      )
+    );
+  }
+
+  // 2. Retrieve the actual quiz from the Course model to get correct answers and points
+  const course = await Course.findOne(
+    { _id: courseId, "quizzes._id": quizId },
+    { "quizzes.$": 1, courseSequence: 1 } // Also fetch courseSequence to identify quiz position
+  );
+
+  if (!course || !course.quizzes || course.quizzes.length === 0) {
+    return next(
+      new AppError(
+        "Course or Quiz not found. Please ensure the course and quiz IDs are correct.",
+        404
+      )
+    );
+  }
+
+  const quiz = course.quizzes[0];
+  if (!quiz) {
+    return next(
+      new AppError("Quiz details could not be retrieved from the course.", 500)
+    );
+  }
+
+  // Create a map for quick lookup of correct answers and points by questionId
+  const correctQuestionsMap = new Map();
+  let totalPossibleQuizPoints = 0;
+
+  quiz.questions.forEach((q) => {
+    correctQuestionsMap.set(q._id.toString(), q);
+    totalPossibleQuizPoints += q.points || 1;
+  });
+
+  let userObtainedScore = 0;
+  const detailedUserAnswers = []; // To store detailed user answers for review
+
+  // 3. Grade each submitted answer
+  for (const submittedAnswer of answers) {
+    const questionInQuiz = correctQuestionsMap.get(submittedAnswer.questionId);
+
+    if (questionInQuiz) {
+      const isCorrect =
+        questionInQuiz.correctAnswer.toLowerCase() ===
+        (submittedAnswer.submittedAnswer || "").toLowerCase();
+
+      if (isCorrect) {
+        userObtainedScore += questionInQuiz.points || 1;
+      }
+
+      detailedUserAnswers.push({
+        questionId: submittedAnswer.questionId,
+        submittedAnswer: submittedAnswer.submittedAnswer,
+        isCorrect: isCorrect,
+        correctAnswer: questionInQuiz.correctAnswer,
+      });
+    } else {
+      console.warn(
+        `Submitted question ID ${submittedAnswer.questionId} not found in quiz ${quizId}`
+      );
+    }
+  }
+
+  // 4. Find or create the MyCourse document for the user
+  let myCourse = await MyCourse.findOne({ userId });
+
+  if (!myCourse) {
+    myCourse = new MyCourse({ userId });
+    await myCourse.save();
+  }
+
+  // 5. Find the specific purchased course entry within myPurchasedCourses
+  let purchasedCourseEntry = myCourse.myPurchasedCourses.find(
+    (entry) => entry.courseId.toString() === courseId // Ensure comparison is safe
+  );
+
+  // If the user hasn't started this specific course yet, add it
+  if (!purchasedCourseEntry) {
+    purchasedCourseEntry = {
+      courseId: courseId,
+      lectureProgress: [],
+      quizScores: [],
+    };
+    myCourse.myPurchasedCourses.push(purchasedCourseEntry);
+  }
+
+  // Ensure 'quizScores' array exists before pushing
+  if (!purchasedCourseEntry.quizScores) {
+    purchasedCourseEntry.quizScores = [];
+  }
+
+  // Check if this quiz has already been submitted by the user for this course
+  // You might want to allow re-submission and store multiple scores, or prevent it.
+  // For simplicity, this example allows multiple submissions, but you could add
+  // logic to update an existing score if you only want the latest attempt.
+  const existingQuizSubmission = purchasedCourseEntry.quizScores.find(
+    (scoreEntry) => scoreEntry.quizId.toString() === quizId
+  );
+
+  let xpChange = userObtainedScore; // XP gained from this quiz submission
+
+  if (existingQuizSubmission) {
+    // If the quiz was already submitted, calculate the difference in score
+    // to adjust XP. This prevents double XP for re-submissions.
+    xpChange = userObtainedScore - existingQuizSubmission.score;
+    // Optional: Update the existing entry or add a new one (adding a new one for history)
+    // If you want to update: existingQuizSubmission.score = userObtainedScore; etc.
+  }
+
+  // Add the new quiz score entry to the user's progress
+  purchasedCourseEntry.quizScores.push({
+    quizId: quizId,
+    score: userObtainedScore,
+    totalPoints: totalPossibleQuizPoints,
+    submittedAt: new Date(),
+    // userAnswers: detailedUserAnswers, // Uncomment if you add userAnswers array to schema
+  });
+
+  // Save the updated MyCourse document to persist the score
+  await myCourse.save();
+
+  let updatedUser; // To hold the user document after XP update
+  let badgeStatusChanges = []; // Array to store info about acquired/removed badges
+
+  // 6. Update user's XP in the User model
+  if (userObtainedScore !== 0) {
+    // Only update XP if there's a change
+    try {
+      updatedUser = await User.findByIdAndUpdate(
+        userId, // Use userId from auth middleware
+        { $inc: { XP: userObtainedScore } },
+        { new: true }
+      );
+      console.log(
+        `User ${userId} XP updated by ${xpChange} after quiz submission.`
+      );
+    } catch (error) {
+      console.error(`Error updating user XP for ${userId}:`, error);
+      return next(new AppError("Failed to update user XP after quiz.", 500));
+    }
+  } else {
+    // If no XP change, still fetch the user to check for badges (e.g., if their XP was already enough)
+    updatedUser = await User.findById(userId);
+  }
+
+  // 7. Badge Assignment and Removal Logic (copied from updateLectureMark)
+  if (updatedUser) {
+    try {
+      const allBadges = await Badges.find({});
+      const userCurrentBadgeIds = updatedUser.BadgesID
+        ? updatedUser.BadgesID.map((id) => id.toString())
+        : [];
+
+      let newBadgesToAwardIds = [];
+      let badgesToPullIds = [];
+
+      for (const badge of allBadges) {
+        const badgeIdString = badge._id.toString();
+        const userHasBadge = userCurrentBadgeIds.includes(badgeIdString);
+
+        if (updatedUser.XP >= badge.XP && !userHasBadge) {
+          newBadgesToAwardIds.push(badge._id);
+          badgeStatusChanges.push({ badge: badge, status: "acquired" });
+          console.log(`User ${userId} acquired badge: ${badge.title}`);
+        } else if (updatedUser.XP < badge.XP && userHasBadge) {
+          badgesToPullIds.push(badge._id);
+          badgeStatusChanges.push({ badge: badge, status: "removed" });
+          console.log(`User ${userId} removed badge: ${badge.title}`);
+        }
+      }
+
+      if (newBadgesToAwardIds.length > 0 || badgesToPullIds.length > 0) {
+        const updateQuery = {};
+        if (newBadgesToAwardIds.length > 0) {
+          updateQuery.$addToSet = { BadgesID: { $each: newBadgesToAwardIds } };
+        }
+        if (badgesToPullIds.length > 0) {
+          updateQuery.$pullAll = { BadgesID: badgesToPullIds };
+        }
+
+        await User.findByIdAndUpdate(
+          userId, // Use userId
+          updateQuery,
+          { new: true }
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Error assigning/removing badges for user ${userId}:`,
+        error
+      );
+      // Log the error but don't prevent the quiz submission response
+    }
+  }
+  console.log("heer", {
+    success: true,
+    message: "Quiz submitted successfully and score recorded!",
+    quizId: quizId,
+    yourScore: userObtainedScore,
+    totalQuizPoints: totalPossibleQuizPoints,
+    XP: updatedUser ? updatedUser.XP : null, // Include current XP in response
+    badgeStatusChanges: badgeStatusChanges, // Include badge changes in response
+    // detailedResults: detailedUserAnswers,
+  });
+
+  // 8. Send Response
+  res.status(200).json({
+    success: true,
+    message: "Quiz submitted successfully and score recorded!",
+    quizId: quizId,
+    yourScore: userObtainedScore,
+    totalQuizPoints: totalPossibleQuizPoints,
+    XP: updatedUser ? updatedUser.XP : null, // Include current XP in response
+    badgeStatusChanges: badgeStatusChanges, // Include badge changes in response
+    // detailedResults: detailedUserAnswers,
   });
 });

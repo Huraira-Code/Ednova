@@ -49,7 +49,7 @@
 ## File Structure
 - `config` - configuration for connection like mongodb and clouinary
 - `controllers`
-- `middleware` - middleware for authentication, errors and file uploads
+- `middleware` - middleware for authentication, errors and file tmp
 - `models`
 - `routes`
 - `utils` - functionality for error and mails

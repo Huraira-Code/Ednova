@@ -1,14 +1,10 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-// import { createServer } from "node:http"; // Not needed if you're not listening yourself
-// import { Server } from "socket.io"; // See explanation below for Socket.IO on Vercel
 import Stripe from "stripe";
 import { config } from "dotenv";
 
 import connectToDB from "./config/db.config.js";
-// import Message from "./models/message.model.js"; // Only uncomment if used outside Socket.IO
-// import Chatroom from "./models/chatroom.model.js"; // Only uncomment if used outside Socket.IO
 
 config(); // Load environment variables from .env
 connectToDB();
@@ -45,56 +41,13 @@ export const stripe = Stripe(process.env.STRIPE_SECRET);
 
 // // handle events on user connect
 // io.on("connection", (socket) => {
-//   socket.on("addUser", (userId) => {
-//     const isUserExist = users.find((user) => userId === user.userId);
-//     if (!isUserExist) {
-//       users.push({ userId, socketId: socket.id });
-//     }
-//     io.emit("getUsers", users);
-//   });
-
-//   socket.on(
-//     "send message",
-//     async ({ senderId, receiverId, content, chatroomId }) => {
-//       const sender = users.find((user) => user.userId === senderId);
-//       const receiver = users.find((user) => user.userId === receiverId);
-
-//       const message = new Message({
-//         sender: senderId,
-//         chatroomId,
-//         content,
-//       });
-
-//       const resullt = await message.save();
-
-//       if (resullt) {
-//         if (receiver) {
-//           io.to(sender.socketId)
-//             .to(receiver.socketId)
-//             .emit("get message", message);
-//         } else {
-//           io.to(sender.socketId).emit("get message", message);
-//           await Chatroom.findOneAndUpdate(
-//             { "unreadCounts.user": senderId, _id: chatroomId },
-//             { $inc: { "unreadCounts.$.count": 1 } },
-//             { new: true }
-//           );
-//         }
-//       }
-//     }
-//   );
-
-//   socket.on("disconnect", () => {
-//     users = users.filter((user) => user.socketId !== socket.id);
-//     io.emit("getUsers", users);
-//   });
+// // ... (rest of your Socket.IO logic)
 // });
 
 const corsOptions = {
   origin: ["http://localhost:5173", process.env.FRONT_URL],
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
   credentials: true,
-  // Removed "Access-Control-Allow-Origin" from allowedHeaders as it's a response header.
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -135,11 +88,19 @@ app.all("*", (req, res) => {
 // handle error and send resopnse
 app.use(errorMiddleware);
 
-// --- THIS IS THE KEY CHANGE FOR VERCEL ---
-// Export the Express app instance directly.
-// Vercel will then handle the HTTP listening and routing to your app.
+// --- MODIFIED SECTION FOR LOCAL DEVELOPMENT ---
+// Define the port. Prioritize environment variable or default to 5000.
+const PORT = process.env.PORT || 5000;
+
+// Only start listening if not in a serverless environment (e.g., Vercel)
+// This check helps prevent Vercel from trying to listen on a port,
+// which it handles automatically.
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server is running locally on port: ${PORT}`);
+    console.log(`Access your API at http://localhost:${PORT}/api/v1/`);
+  });
+}
+
+// Export the Express app instance. This is crucial for Vercel.
 export default app;
-// Remove the server.listen() call as Vercel handles this
-// server.listen(PORT, () => {
-//   console.log(`server is running on port: ${PORT}`);
-// });

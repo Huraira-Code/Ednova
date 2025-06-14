@@ -24,24 +24,24 @@ export const register = asyncHandler(async (req, res, next) => {
   const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
-    if (req.file) fs.rmSync(`uploads/${req.file.filename}`);
+    if (req.file) fs.rmSync(`tmp/${req.file.filename}`);
     return next(new AppError("all fields are required", 400));
   }
 
   if (password.length < 8) {
-    if (req.file) fs.rmSync(`uploads/${req.file.filename}`);
+    if (req.file) fs.rmSync(`tmp/${req.file.filename}`);
     return next(new AppError("password must be atleast 8 char long", 400));
   }
 
   if (name.length < 3 || name.length > 30) {
-    if (req.file) fs.rmSync(`uploads/${req.file.filename}`);
+    if (req.file) fs.rmSync(`tmp/${req.file.filename}`);
     return next(new AppError("name must atlesast 5 char and not more than 50"));
   }
 
   const isUserExist = await User.findOne({ email });
 
   if (isUserExist) {
-    if (req.file) fs.rmSync(`uploads/${req.file.filename}`);
+    if (req.file) fs.rmSync(`tmp/${req.file.filename}`);
     return next(new AppError("please enter another email address", 400));
   }
 
@@ -79,7 +79,7 @@ export const register = asyncHandler(async (req, res, next) => {
       }
 
       // removing avatar image from server
-      fs.rmSync(`uploads/${req.file.filename}`);
+      fs.rmSync(`tmp/${req.file.filename}`);
     } catch (error) {
       return next(new AppError("file upoding error: " + error, 400));
     }
@@ -319,7 +319,7 @@ export const updateProfile = asyncHandler(async (req, res, next) => {
   const user = await User.findById(id);
 
   if (!user) {
-    if (req.file) fs.rmSync(`uploads/${req.file.filename}`);
+    if (req.file) fs.rmSync(`tmp/${req.file.filename}`);
     return next(new AppError("user not exist on this id", 400));
   }
 
@@ -345,11 +345,11 @@ export const updateProfile = asyncHandler(async (req, res, next) => {
         user.avatar.public_id = result.public_id;
         user.avatar.secure_url = result.secure_url;
 
-        fs.rmSync(`uploads/${req.file.filename}`);
+        fs.rmSync(`tmp/${req.file.filename}`);
       }
     } catch (error) {
-      for (const file of fs.readdir("uploads/")) {
-        fs.rmSync(`uploads/${file}`);
+      for (const file of fs.readdir("tmp/")) {
+        fs.rmSync(`tmp/${file}`);
       }
       return next(new AppError("updating profile avatar error: " + error, 400));
     }
